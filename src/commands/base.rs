@@ -300,7 +300,7 @@ impl CommandHandler {
             b'c',
             b'c',
             b'l',
-            b'i', // app name
+            b'i', // app name TODO review this
         ];
         let event = self.send(&data, Some(EventType::SelfInfo)).await?;
 
