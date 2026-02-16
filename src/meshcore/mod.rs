@@ -306,7 +306,7 @@ impl MeshCore {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```dont_run
     /// use futures::StreamExt;
     ///
     /// let mut stream = meshcore.event_stream();
@@ -325,7 +325,7 @@ impl MeshCore {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```dont_run
     /// use futures::StreamExt;
     /// use meshcore_rs::EventType;
     ///

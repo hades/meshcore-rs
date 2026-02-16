@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Connect via BLE
     let radios = MeshCore::ble_discover(Duration::from_secs(4)).await?;
-    let meshcore = MeshCore::ble_connect(radios.get(0).unwrap()).await?;
+    let meshcore = MeshCore::ble_connect(radios.first().unwrap()).await?;
 
     println!("Connected via BLE!");
 

@@ -275,6 +275,18 @@ pub struct ReceivedMessage {
     pub channel: Option<u8>,
 }
 
+impl ReceivedMessage {
+    /// Generate a "unique-ish" message ID for this message"
+    pub fn message_id(&self) -> u64 {
+        let mut bytes = [0u8; 8];
+        // Use the first 4 bytes of sender_prefix
+        bytes[0..4].copy_from_slice(&self.sender_prefix[0..4]);
+        // XOR the timestamp into the remaining 4 bytes for uniqueness
+        bytes[4..8].copy_from_slice(&self.sender_timestamp.to_be_bytes());
+        u64::from_be_bytes(bytes)
+    }
+}
+
 /// Message sent acknowledgment
 #[derive(Debug, Clone)]
 pub struct MsgSentInfo {

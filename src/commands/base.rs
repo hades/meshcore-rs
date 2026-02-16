@@ -353,27 +353,25 @@ impl CommandHandler {
     /// Set device time
     ///
     /// Format: [CMD_SET_DEVICE_TIME=0x06][timestamp: u32]
-    pub async fn set_time(&self, timestamp: u32) -> Result<()> {
+    pub async fn set_time(&self, timestamp: u32) -> Result<MeshCoreEvent> {
         let mut data = vec![CMD_SET_DEVICE_TIME];
         data.extend_from_slice(&timestamp.to_le_bytes());
-        self.send(&data, Some(EventType::Ok)).await?;
-        Ok(())
+        self.send(&data, Some(EventType::Ok)).await
     }
 
     /// Set the device name
     ///
     /// Format: [CMD_SET_ADVERT_NAME=0x08][name]
-    pub async fn set_name(&self, name: &str) -> Result<()> {
+    pub async fn set_name(&self, name: &str) -> Result<MeshCoreEvent> {
         let mut data = vec![CMD_SET_ADVERT_NAME];
         data.extend_from_slice(name.as_bytes());
-        self.send(&data, Some(EventType::Ok)).await?;
-        Ok(())
+        self.send(&data, Some(EventType::Ok)).await
     }
 
     /// Set device coordinates
     ///
     /// Format: [CMD_SET_ADVERT_LATLON=0x0E][lat: i32][lon: i32][alt: i32]
-    pub async fn set_coords(&self, lat: f64, lon: f64) -> Result<()> {
+    pub async fn set_coords(&self, lat: f64, lon: f64) -> Result<MeshCoreEvent> {
         let lat_micro = to_microdegrees(lat);
         let lon_micro = to_microdegrees(lon);
 
@@ -381,30 +379,27 @@ impl CommandHandler {
         data.extend_from_slice(&lat_micro.to_le_bytes());
         data.extend_from_slice(&lon_micro.to_le_bytes());
         // Alt is optional, firmware handles len >= 9
-        self.send(&data, Some(EventType::Ok)).await?;
-        Ok(())
+        self.send(&data, Some(EventType::Ok)).await
     }
 
     /// Set TX power
     ///
     /// Format: [CMD_SET_RADIO_TX_POWER=0x0C][power: u8]
-    pub async fn set_tx_power(&self, power: u8) -> Result<()> {
+    pub async fn set_tx_power(&self, power: u8) -> Result<MeshCoreEvent> {
         let data = [CMD_SET_RADIO_TX_POWER, power];
-        self.send(&data, Some(EventType::Ok)).await?;
-        Ok(())
+        self.send(&data, Some(EventType::Ok)).await
     }
 
     /// Send advertisement
     ///
     /// Format: [CMD_SEND_SELF_ADVERT=0x07][flood: optional]
-    pub async fn send_advert(&self, flood: bool) -> Result<()> {
+    pub async fn send_advert(&self, flood: bool) -> Result<MeshCoreEvent> {
         let data = if flood {
             vec![CMD_SEND_SELF_ADVERT, 0x01]
         } else {
             vec![CMD_SEND_SELF_ADVERT]
         };
-        self.send(&data, Some(EventType::Ok)).await?;
-        Ok(())
+        self.send(&data, Some(EventType::Ok)).await
     }
 
     /// Reboot device (no response expected)
@@ -415,8 +410,7 @@ impl CommandHandler {
         self.sender
             .send(data.to_vec())
             .await
-            .map_err(|e| Error::Channel(e.to_string()))?;
-        Ok(())
+            .map_err(|e| Error::Channel(e.to_string()))
     }
 
     /// Get custom variables
@@ -663,12 +657,21 @@ impl CommandHandler {
         });
 
         // TXT_TYPE_PLAIN = 0, attempt = 0
-        let mut data = vec![CMD_SEND_TXT_MSG, 0x00, 0x00];
+        let mut data = vec![CMD_SEND_TXT_MSG, 0x00, 0x00]; // Second 0x00 is "attempt"
         data.extend_from_slice(&ts.to_le_bytes());
         data.extend_from_slice(&prefix);
         data.extend_from_slice(msg.as_bytes());
 
-        let event = self.send(&data, Some(EventType::MsgSent)).await?;
+        let event = self
+            .send_with_timeout(&data, Some(EventType::MsgSent), Duration::from_secs(10))
+            .await?;
+
+        if event.event_type == EventType::Error {
+            return match event.payload {
+                EventPayload::String(error_message) => Err(Error::protocol(error_message)),
+                _ => Err(Error::protocol("Unexpected response to send_msg")),
+            };
+        }
 
         match event.payload {
             EventPayload::MsgSent(info) => Ok(info),
@@ -684,7 +687,7 @@ impl CommandHandler {
         channel: u8,
         msg: &str,
         timestamp: Option<u32>,
-    ) -> Result<()> {
+    ) -> Result<MsgSentInfo> {
         let ts = timestamp.unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -697,8 +700,12 @@ impl CommandHandler {
         data.extend_from_slice(&ts.to_le_bytes());
         data.extend_from_slice(msg.as_bytes());
 
-        self.send(&data, Some(EventType::Ok)).await?;
-        Ok(())
+        let event = self.send(&data, Some(EventType::Ok)).await?;
+
+        match event.payload {
+            EventPayload::MsgSent(info) => Ok(info),
+            _ => Err(Error::protocol("Unexpected response to send_chan_msg")),
+        }
     }
 
     /// Send login request
