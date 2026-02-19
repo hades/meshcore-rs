@@ -66,7 +66,10 @@ pub mod reader;
 mod meshcore;
 
 pub use error::Error;
-pub use events::{EventDispatcher, EventType, MeshCoreEvent, Subscription};
+pub use events::{
+    ChannelMessage, ContactMessage, EventDispatcher, EventPayload, EventType, MeshCoreEvent,
+    Subscription,
+};
 pub use meshcore::MeshCore;
 pub use packets::{AnonReqType, BinaryReqType, ControlType, PacketType};
 

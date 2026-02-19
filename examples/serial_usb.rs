@@ -66,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             EventType::ContactMsgRecv,
             std::collections::HashMap::new(),
             |event| {
-                if let meshcore_rs::events::EventPayload::Message(msg) = event.payload {
+                if let meshcore_rs::events::EventPayload::ContactMessage(msg) = event.payload {
                     println!(
                         "Received message from {:02x?}: {}",
                         msg.sender_prefix, msg.text

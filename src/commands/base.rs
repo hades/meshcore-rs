@@ -280,7 +280,7 @@ impl CommandHandler {
 
     // ========== Device Commands ==========
 
-    /// Send APPSTART command to initialize connection
+    /// Send APPSTART command to initialise connection
     ///
     /// Format: [CMD_APP_START=0x01][reserved: 7 bytes][app_name: "mccli"]
     pub async fn send_appstart(&self) -> Result<SelfInfo> {
@@ -602,14 +602,21 @@ impl CommandHandler {
     // ========== Messaging Commands ==========
 
     /// Get the next message from the queue
-    pub async fn get_msg(&self) -> Result<Option<ReceivedMessage>> {
+    ///
+    /// Returns the event containing either a `ContactMessage` or `ChannelMessage` payload.
+    /// Returns `None` if there are no more messages.
+    ///
+    /// The caller should check `event.event_type` to determine the message type:
+    /// - `EventType::ContactMsgRecv` → `EventPayload::ContactMessage(msg)`
+    /// - `EventType::ChannelMsgRecv` → `EventPayload::ChannelMessage(msg)`
+    pub async fn get_msg(&self) -> Result<Option<MeshCoreEvent>> {
         self.get_msg_with_timeout(self.default_timeout).await
     }
 
     /// Get the next message with a custom timeout
     ///
     /// Format: [CMD_SYNC_NEXT_MESSAGE=0x0A]
-    pub async fn get_msg_with_timeout(&self, timeout: Duration) -> Result<Option<ReceivedMessage>> {
+    pub async fn get_msg_with_timeout(&self, timeout: Duration) -> Result<Option<MeshCoreEvent>> {
         let data = [CMD_SYNC_NEXT_MESSAGE];
         let event = self
             .send_multi(
@@ -625,10 +632,7 @@ impl CommandHandler {
             .await?;
 
         match event.event_type {
-            EventType::ContactMsgRecv | EventType::ChannelMsgRecv => match event.payload {
-                EventPayload::Message(msg) => Ok(Some(msg)),
-                _ => Err(Error::protocol("Unexpected payload for message")),
-            },
+            EventType::ContactMsgRecv | EventType::ChannelMsgRecv => Ok(Some(event)),
             EventType::NoMoreMessages => Ok(None),
             EventType::Error => match event.payload {
                 EventPayload::String(msg) => Err(Error::device(msg)),
@@ -682,12 +686,12 @@ impl CommandHandler {
     /// Send a channel message
     ///
     /// Format: [CMD_SEND_CHANNEL_TXT_MSG=0x03][txt_type][channel_idx][timestamp: u32][message]
-    pub async fn send_chan_msg(
+    pub async fn send_channel_msg(
         &self,
         channel: u8,
         msg: &str,
         timestamp: Option<u32>,
-    ) -> Result<MsgSentInfo> {
+    ) -> Result<()> {
         let ts = timestamp.unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -700,12 +704,9 @@ impl CommandHandler {
         data.extend_from_slice(&ts.to_le_bytes());
         data.extend_from_slice(msg.as_bytes());
 
-        let event = self.send(&data, Some(EventType::Ok)).await?;
+        let _ = self.send(&data, Some(EventType::Ok)).await?;
 
-        match event.payload {
-            EventPayload::MsgSent(info) => Ok(info),
-            _ => Err(Error::protocol("Unexpected response to send_chan_msg")),
-        }
+        Ok(())
     }
 
     /// Send login request
@@ -790,13 +791,13 @@ impl CommandHandler {
     }
 
     /// Request status from a contact
-    pub async fn req_status(&self, dest: impl Into<Destination>) -> Result<StatusData> {
-        self.req_status_with_timeout(dest, self.default_timeout)
+    pub async fn request_status(&self, dest: impl Into<Destination>) -> Result<StatusData> {
+        self.request_status_with_timeout(dest, self.default_timeout)
             .await
     }
 
     /// Request status with the custom timeout
-    pub async fn req_status_with_timeout(
+    pub async fn request_status_with_timeout(
         &self,
         dest: impl Into<Destination>,
         timeout: Duration,
@@ -817,13 +818,13 @@ impl CommandHandler {
     }
 
     /// Request telemetry from a contact
-    pub async fn req_telemetry(&self, dest: impl Into<Destination>) -> Result<Vec<u8>> {
-        self.req_telemetry_with_timeout(dest, self.default_timeout)
+    pub async fn request_telemetry(&self, dest: impl Into<Destination>) -> Result<Vec<u8>> {
+        self.request_telemetry_with_timeout(dest, self.default_timeout)
             .await
     }
 
     /// Request telemetry with the custom timeout
-    pub async fn req_telemetry_with_timeout(
+    pub async fn request_telemetry_with_timeout(
         &self,
         dest: impl Into<Destination>,
         timeout: Duration,
@@ -844,12 +845,13 @@ impl CommandHandler {
     }
 
     /// Request ACL from a contact
-    pub async fn req_acl(&self, dest: impl Into<Destination>) -> Result<Vec<AclEntry>> {
-        self.req_acl_with_timeout(dest, self.default_timeout).await
+    pub async fn request_acl(&self, dest: impl Into<Destination>) -> Result<Vec<AclEntry>> {
+        self.request_acl_with_timeout(dest, self.default_timeout)
+            .await
     }
 
     /// Request ACL with the custom timeout
-    pub async fn req_acl_with_timeout(
+    pub async fn request_acl_with_timeout(
         &self,
         dest: impl Into<Destination>,
         timeout: Duration,
@@ -869,21 +871,21 @@ impl CommandHandler {
         }
     }
 
-    /// Request neighbors from a contact
-    pub async fn req_neighbours(
+    /// Request neighbours from a contact
+    pub async fn request_neighbours(
         &self,
         dest: impl Into<Destination>,
         count: u16,
         offset: u16,
     ) -> Result<NeighboursData> {
-        self.req_neighbours_with_timeout(dest, count, offset, self.default_timeout)
+        self.request_neighbours_with_timeout(dest, count, offset, self.default_timeout)
             .await
     }
 
-    /// Request neighbors with custom timeout
+    /// Request neighbours with custom timeout
     ///
     /// Format: [CMD_SEND_BINARY_REQ=0x32][req_type][pubkey: 32][count: u16][offset: u16]
-    pub async fn req_neighbours_with_timeout(
+    pub async fn request_neighbours_with_timeout(
         &self,
         dest: impl Into<Destination>,
         count: u16,
@@ -1776,7 +1778,7 @@ mod tests {
         tokio::spawn(async move {
             let _sent = rx.recv().await.unwrap();
 
-            let msg = ReceivedMessage {
+            let msg = ContactMessage {
                 sender_prefix: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06],
                 path_len: 2,
                 txt_type: 1,
@@ -1784,19 +1786,24 @@ mod tests {
                 text: "Hello!".to_string(),
                 snr: None,
                 signature: None,
-                channel: None,
             };
             dispatcher_clone
                 .emit(MeshCoreEvent::new(
                     EventType::ContactMsgRecv,
-                    EventPayload::Message(msg),
+                    EventPayload::ContactMessage(msg),
                 ))
                 .await;
         });
 
         let result = handler.get_msg().await;
         assert!(result.is_ok());
-        let msg = result.unwrap().unwrap();
-        assert_eq!(msg.text, "Hello!");
+        let event = result.unwrap().unwrap();
+        assert_eq!(event.event_type, EventType::ContactMsgRecv);
+        match event.payload {
+            EventPayload::ContactMessage(msg) => {
+                assert_eq!(msg.text, "Hello!");
+            }
+            _ => panic!("Expected ContactMessage payload"),
+        }
     }
 }

@@ -101,9 +101,11 @@ pub enum EventPayload {
     Battery(BatteryInfo),
     /// Current time (Unix timestamp)
     Time(u32),
-    /// Message received
-    Message(ReceivedMessage),
-    /// Message sent acknowledgment
+    /// Contact message received (direct message from a contact)
+    ContactMessage(ContactMessage),
+    /// Channel message received (message on a group channel)
+    ChannelMessage(ChannelMessage),
+    /// Message sent acknowledgement
     MsgSent(MsgSentInfo),
     /// Status response
     Status(StatusData),
@@ -143,6 +145,8 @@ pub enum EventPayload {
     Stats(StatsData),
     /// AutoAdd config
     AutoAddConfig { flags: u8 },
+    /// RF log data
+    LogData(LogData),
 }
 
 /// Contact information
@@ -254,14 +258,14 @@ pub struct BatteryInfo {
     pub storage: u16,
 }
 
-/// Received message
+/// Contact message - a direct message from a contact (identified by sender public key prefix)
 #[derive(Debug, Clone)]
-pub struct ReceivedMessage {
+pub struct ContactMessage {
     /// Sender public key prefix (6 bytes)
     pub sender_prefix: [u8; 6],
     /// Path length
     pub path_len: u8,
-    /// Text type (2 = signed)
+    /// Text type (0 = plain, 2 = signed)
     pub txt_type: u8,
     /// Sender timestamp
     pub sender_timestamp: u32,
@@ -271,12 +275,10 @@ pub struct ReceivedMessage {
     pub snr: Option<f32>,
     /// Signature (if txt_type == 2)
     pub signature: Option<[u8; 4]>,
-    /// Channel index (for channel messages)
-    pub channel: Option<u8>,
 }
 
-impl ReceivedMessage {
-    /// Generate a "unique-ish" message ID for this message"
+impl ContactMessage {
+    /// Generate a "unique-ish" message ID for this message
     pub fn message_id(&self) -> u64 {
         let mut bytes = [0u8; 8];
         // Use the first 4 bytes of sender_prefix
@@ -285,9 +287,43 @@ impl ReceivedMessage {
         bytes[4..8].copy_from_slice(&self.sender_timestamp.to_be_bytes());
         u64::from_be_bytes(bytes)
     }
+
+    /// Get the sender prefix as a hex string
+    pub fn sender_prefix_hex(&self) -> String {
+        crate::parsing::hex_encode(&self.sender_prefix)
+    }
 }
 
-/// Message sent acknowledgment
+/// Channel message - a message received on a group channel (identified by channel index)
+#[derive(Debug, Clone)]
+pub struct ChannelMessage {
+    /// Channel index
+    pub channel_idx: u8,
+    /// Path length
+    pub path_len: u8,
+    /// Text type (0 = plain)
+    pub txt_type: u8,
+    /// Sender timestamp
+    pub sender_timestamp: u32,
+    /// Message text
+    pub text: String,
+    /// SNR (only in v3, divided by 4)
+    pub snr: Option<f32>,
+}
+
+impl ChannelMessage {
+    /// Generate a "unique-ish" message ID for this message
+    pub fn message_id(&self) -> u64 {
+        let mut bytes = [0u8; 8];
+        // Use the channel index in the first byte
+        bytes[0] = self.channel_idx;
+        // Use the timestamp for uniqueness
+        bytes[4..8].copy_from_slice(&self.sender_timestamp.to_be_bytes());
+        u64::from_be_bytes(bytes)
+    }
+}
+
+/// Message sent acknowledgement
 #[derive(Debug, Clone)]
 pub struct MsgSentInfo {
     /// Message type
@@ -411,11 +447,11 @@ pub struct AclEntry {
 pub struct NeighboursData {
     /// Total neighbours available
     pub total: u16,
-    /// Neighbors in this response
+    /// Neighbours in this response
     pub neighbours: Vec<Neighbour>,
 }
 
-/// Single neighbor entry
+/// Single neighbour entry
 #[derive(Debug, Clone)]
 pub struct Neighbour {
     /// Public key (variable length)
@@ -473,6 +509,17 @@ pub enum StatsCategory {
     Core,
     Radio,
     Packets,
+}
+
+/// RF log data from the device
+#[derive(Debug, Clone)]
+pub struct LogData {
+    /// Signal-to-noise ratio (signed byte / 4.0)
+    pub snr: f32,
+    /// Received signal strength indicator (dBm)
+    pub rssi: i16,
+    /// Raw RF payload
+    pub payload: Vec<u8>,
 }
 
 /// An event emitted by the reader
@@ -1094,8 +1141,8 @@ mod tests {
     }
 
     #[test]
-    fn test_received_message_clone() {
-        let msg = ReceivedMessage {
+    fn test_contact_message_clone() {
+        let msg = ContactMessage {
             sender_prefix: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06],
             path_len: 2,
             txt_type: 1,
@@ -1103,12 +1150,27 @@ mod tests {
             text: "Hello".to_string(),
             snr: Some(10.0),
             signature: None,
-            channel: None,
         };
 
         let cloned = msg.clone();
         assert_eq!(cloned.text, "Hello");
         assert_eq!(cloned.snr, Some(10.0));
+    }
+
+    #[test]
+    fn test_channel_message_clone() {
+        let msg = ChannelMessage {
+            channel_idx: 5,
+            path_len: 1,
+            txt_type: 0,
+            sender_timestamp: 1234567890,
+            text: "Channel msg".to_string(),
+            snr: Some(8.5),
+        };
+
+        let cloned = msg.clone();
+        assert_eq!(cloned.channel_idx, 5);
+        assert_eq!(cloned.text, "Channel msg");
     }
 
     #[test]
@@ -1206,5 +1268,68 @@ mod tests {
             data: vec![5, 6, 7, 8],
         };
         let _auto_add = EventPayload::AutoAddConfig { flags: 0x01 };
+        let _log_data = EventPayload::LogData(LogData {
+            snr: 10.5,
+            rssi: -80,
+            payload: vec![0x01, 0x02, 0x03],
+        });
+    }
+
+    #[test]
+    fn test_log_data_clone() {
+        let log_data = LogData {
+            snr: 12.25,
+            rssi: -75,
+            payload: vec![0xAA, 0xBB, 0xCC],
+        };
+        let cloned = log_data.clone();
+        assert_eq!(cloned.snr, 12.25);
+        assert_eq!(cloned.rssi, -75);
+        assert_eq!(cloned.payload, vec![0xAA, 0xBB, 0xCC]);
+    }
+
+    #[test]
+    fn test_log_data_debug() {
+        let log_data = LogData {
+            snr: 5.5,
+            rssi: -90,
+            payload: vec![0x01, 0x02],
+        };
+        let debug_str = format!("{:?}", log_data);
+        assert!(debug_str.contains("snr"));
+        assert!(debug_str.contains("rssi"));
+        assert!(debug_str.contains("payload"));
+    }
+
+    #[test]
+    fn test_log_data_snr_conversion() {
+        // SNR is stored as signed byte / 4.0
+        // So SNR byte 40 = 10.0, SNR byte -40 = -10.0
+        let log_data = LogData {
+            snr: 10.0, // Would be byte value 40
+            rssi: -85,
+            payload: vec![],
+        };
+        assert_eq!(log_data.snr, 10.0);
+    }
+
+    #[test]
+    fn test_log_data_negative_snr() {
+        let log_data = LogData {
+            snr: -5.25, // Would be byte value -21
+            rssi: -100,
+            payload: vec![0x01],
+        };
+        assert_eq!(log_data.snr, -5.25);
+    }
+
+    #[test]
+    fn test_log_data_empty_payload() {
+        let log_data = LogData {
+            snr: 0.0,
+            rssi: 0,
+            payload: vec![],
+        };
+        assert!(log_data.payload.is_empty());
     }
 }

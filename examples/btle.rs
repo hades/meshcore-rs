@@ -12,12 +12,8 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize logging with DEBUG level for mod.rs
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("mod.rs-rs=debug".parse().unwrap()),
-        )
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
     // Connect via BLE
@@ -26,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Connected via BLE!");
 
-    // Send APPSTART to initialize connection and get device info
+    // Send APPSTART to initialise connection and get device info
     let self_info = meshcore.commands().lock().await.send_appstart().await?;
     println!("Connected to device: {}", self_info.name);
     println!("  Public key: {:02x?}", &self_info.public_key[..6]);

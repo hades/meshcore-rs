@@ -205,24 +205,40 @@ impl MessageReader {
 
             PacketType::ContactMsgRecv => {
                 if let Ok(msg) = parse_contact_msg(payload) {
-                    let event =
-                        MeshCoreEvent::new(EventType::ContactMsgRecv, EventPayload::Message(msg));
+                    let event = MeshCoreEvent::new(
+                        EventType::ContactMsgRecv,
+                        EventPayload::ContactMessage(msg),
+                    );
                     self.dispatcher.emit(event).await;
                 }
             }
 
             PacketType::ContactMsgRecvV3 => {
                 if let Ok(msg) = parse_contact_msg_v3(payload) {
-                    let event =
-                        MeshCoreEvent::new(EventType::ContactMsgRecv, EventPayload::Message(msg));
+                    let event = MeshCoreEvent::new(
+                        EventType::ContactMsgRecv,
+                        EventPayload::ContactMessage(msg),
+                    );
                     self.dispatcher.emit(event).await;
                 }
             }
 
-            PacketType::ChannelMsgRecv | PacketType::ChannelMsgRecvV3 => {
+            PacketType::ChannelMsgRecv => {
                 if let Ok(msg) = parse_channel_msg(payload) {
-                    let event =
-                        MeshCoreEvent::new(EventType::ChannelMsgRecv, EventPayload::Message(msg));
+                    let event = MeshCoreEvent::new(
+                        EventType::ChannelMsgRecv,
+                        EventPayload::ChannelMessage(msg),
+                    );
+                    self.dispatcher.emit(event).await;
+                }
+            }
+
+            PacketType::ChannelMsgRecvV3 => {
+                if let Ok(msg) = parse_channel_msg_v3(payload) {
+                    let event = MeshCoreEvent::new(
+                        EventType::ChannelMsgRecv,
+                        EventPayload::ChannelMessage(msg),
+                    );
                     self.dispatcher.emit(event).await;
                 }
             }
@@ -612,7 +628,40 @@ impl MessageReader {
                     self.dispatcher.emit(event).await;
                 }
             }
+            PacketType::BinaryReq => {}
+            PacketType::FactoryReset => {}
+            PacketType::PathDiscovery => {}
+            PacketType::SetFloodScope => {}
+            PacketType::SendControlData => {}
+            PacketType::RawData => {}
+            PacketType::LogData => {
+                // LOG_DATA format:
+                // Byte 0: SNR (signed byte, divide by 4.0)
+                // Byte 1: RSSI (signed byte)
+                // Bytes 2+: Raw RF payload
+                if payload.len() >= 2 {
+                    let snr_byte = payload[0] as i8;
+                    let snr = snr_byte as f32 / 4.0;
 
+                    let rssi = payload[1] as i8 as i16;
+
+                    let rf_payload = if payload.len() > 2 {
+                        payload[2..].to_vec()
+                    } else {
+                        Vec::new()
+                    };
+
+                    let log_data = LogData {
+                        snr,
+                        rssi,
+                        payload: rf_payload,
+                    };
+                    let event =
+                        MeshCoreEvent::new(EventType::LogData, EventPayload::LogData(log_data));
+                    self.dispatcher.emit(event).await;
+                }
+            }
+            PacketType::PathDiscoveryResponse => {}
             _ => {
                 // Unknown packet type - emit raw data
                 tracing::debug!("Unknown packet type: {:?}", packet_type);
@@ -1524,11 +1573,11 @@ mod tests {
 
         assert_eq!(event.event_type, EventType::ContactMsgRecv);
         match event.payload {
-            EventPayload::Message(msg) => {
+            EventPayload::ContactMessage(msg) => {
                 assert_eq!(msg.text, "Hello!");
                 assert_eq!(msg.path_len, 2);
             }
-            _ => panic!("Expected Message payload"),
+            _ => panic!("Expected ContactMessage payload"),
         }
     }
 
@@ -1555,11 +1604,11 @@ mod tests {
 
         assert_eq!(event.event_type, EventType::ContactMsgRecv);
         match event.payload {
-            EventPayload::Message(msg) => {
+            EventPayload::ContactMessage(msg) => {
                 assert_eq!(msg.text, "V3 msg!");
                 assert_eq!(msg.snr, Some(10.0));
             }
-            _ => panic!("Expected Message payload"),
+            _ => panic!("Expected ContactMessage payload"),
         }
     }
 
@@ -1569,8 +1618,7 @@ mod tests {
         let mut receiver = dispatcher.receiver();
 
         let mut data = vec![PacketType::ChannelMsgRecv as u8];
-        data.push(5); // channel
-        data.extend_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]); // sender_prefix
+        data.push(5); // channel_idx
         data.push(1); // path_len
         data.push(0); // txt_type
         data.extend_from_slice(&1234567890u32.to_le_bytes()); // sender_timestamp
@@ -1585,11 +1633,11 @@ mod tests {
 
         assert_eq!(event.event_type, EventType::ChannelMsgRecv);
         match event.payload {
-            EventPayload::Message(msg) => {
-                assert_eq!(msg.channel, Some(5));
+            EventPayload::ChannelMessage(msg) => {
+                assert_eq!(msg.channel_idx, 5);
                 assert_eq!(msg.text, "Channel msg");
             }
-            _ => panic!("Expected Message payload"),
+            _ => panic!("Expected ChannelMessage payload"),
         }
     }
 

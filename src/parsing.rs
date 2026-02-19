@@ -2,7 +2,8 @@
 
 use crate::error::Error;
 use crate::events::{
-    AclEntry, Contact, MmaEntry, Neighbour, NeighboursData, ReceivedMessage, SelfInfo, StatusData,
+    AclEntry, ChannelMessage, Contact, ContactMessage, MmaEntry, Neighbour, NeighboursData,
+    SelfInfo, StatusData,
 };
 use crate::Result;
 
@@ -232,8 +233,8 @@ pub fn parse_status(data: &[u8], sender_prefix: [u8; 6]) -> Result<StatusData> {
     })
 }
 
-/// Parse a received message (contact message v2 format)
-pub fn parse_contact_msg(data: &[u8]) -> Result<ReceivedMessage> {
+/// Parse a contact message (v2 format)
+pub fn parse_contact_msg(data: &[u8]) -> Result<ContactMessage> {
     if data.len() < 12 {
         return Err(Error::protocol("Contact message too short"));
     }
@@ -256,7 +257,7 @@ pub fn parse_contact_msg(data: &[u8]) -> Result<ReceivedMessage> {
         String::new()
     };
 
-    Ok(ReceivedMessage {
+    Ok(ContactMessage {
         sender_prefix,
         path_len,
         txt_type,
@@ -264,12 +265,11 @@ pub fn parse_contact_msg(data: &[u8]) -> Result<ReceivedMessage> {
         text,
         snr: None,
         signature,
-        channel: None,
     })
 }
 
-/// Parse a received message v3 format (with SNR)
-pub fn parse_contact_msg_v3(data: &[u8]) -> Result<ReceivedMessage> {
+/// Parse a contact message v3 format (with SNR)
+pub fn parse_contact_msg_v3(data: &[u8]) -> Result<ContactMessage> {
     if data.len() < 15 {
         return Err(Error::protocol("Contact message v3 too short"));
     }
@@ -296,7 +296,7 @@ pub fn parse_contact_msg_v3(data: &[u8]) -> Result<ReceivedMessage> {
         String::new()
     };
 
-    Ok(ReceivedMessage {
+    Ok(ContactMessage {
         sender_prefix,
         path_len,
         txt_type,
@@ -304,37 +304,64 @@ pub fn parse_contact_msg_v3(data: &[u8]) -> Result<ReceivedMessage> {
         text,
         snr: Some(snr),
         signature,
-        channel: None,
     })
 }
 
-/// Parse a channel message
-pub fn parse_channel_msg(data: &[u8]) -> Result<ReceivedMessage> {
-    if data.len() < 13 {
+/// Parse a channel message (v2 format)
+pub fn parse_channel_msg(data: &[u8]) -> Result<ChannelMessage> {
+    if data.len() < 8 {
         return Err(Error::protocol("Channel message too short"));
     }
 
-    let channel = data[0];
-    let sender_prefix: [u8; 6] = read_bytes(data, 1)?;
-    let path_len = data[7];
-    let txt_type = data[8];
-    let sender_timestamp = read_u32_le(data, 9)?;
+    let channel_idx = data[0];
+    let path_len = data[1];
+    let txt_type = data[2];
+    let sender_timestamp = read_u32_le(data, 3)?;
 
-    let text = if data.len() > 13 {
-        String::from_utf8_lossy(&data[13..]).to_string()
+    let text = if data.len() > 7 {
+        String::from_utf8_lossy(&data[7..]).to_string()
     } else {
         String::new()
     };
 
-    Ok(ReceivedMessage {
-        sender_prefix,
+    Ok(ChannelMessage {
+        channel_idx,
         path_len,
         txt_type,
         sender_timestamp,
         text,
         snr: None,
-        signature: None,
-        channel: Some(channel),
+    })
+}
+
+/// Parse a channel message v3 format (with SNR)
+pub fn parse_channel_msg_v3(data: &[u8]) -> Result<ChannelMessage> {
+    if data.len() < 11 {
+        return Err(Error::protocol("Channel message v3 too short"));
+    }
+
+    let snr_raw = data[0] as i8;
+    let snr = snr_raw as f32 / 4.0;
+    // bytes 1-2 are reserved
+
+    let channel_idx = data[3];
+    let path_len = data[4];
+    let txt_type = data[5];
+    let sender_timestamp = read_u32_le(data, 6)?;
+
+    let text = if data.len() > 10 {
+        String::from_utf8_lossy(&data[10..]).to_string()
+    } else {
+        String::new()
+    };
+
+    Ok(ChannelMessage {
+        channel_idx,
+        path_len,
+        txt_type,
+        sender_timestamp,
+        text,
+        snr: Some(snr),
     })
 }
 
@@ -848,24 +875,47 @@ mod tests {
 
     #[test]
     fn test_parse_channel_msg() {
-        let mut data = vec![0u8; 20];
-        data[0] = 5; // channel
-        data[1..7].copy_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
-        data[7] = 1; // path_len
-        data[8] = 0; // txt_type
-        data[9..13].copy_from_slice(&1234567890u32.to_le_bytes());
-        data[13..20].copy_from_slice(b"Channel");
+        let mut data = Vec::new();
+        data.push(5); // channel_idx
+        data.push(1); // path_len
+        data.push(0); // txt_type
+        data.extend_from_slice(&1234567890u32.to_le_bytes());
+        data.extend_from_slice(b"Channel");
 
         let msg = parse_channel_msg(&data).unwrap();
-        assert_eq!(msg.channel, Some(5));
-        assert_eq!(msg.sender_prefix, [0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
+        assert_eq!(msg.channel_idx, 5);
+        assert_eq!(msg.path_len, 1);
         assert_eq!(msg.text, "Channel");
     }
 
     #[test]
     fn test_parse_channel_msg_too_short() {
-        let data = vec![0u8; 10];
+        let data = vec![0u8; 5];
         assert!(parse_channel_msg(&data).is_err());
+    }
+
+    #[test]
+    fn test_parse_channel_msg_v3() {
+        let mut data = Vec::new();
+        data.push(40); // snr_raw = 40, SNR = 10.0
+        data.extend_from_slice(&[0x00, 0x00]); // reserved bytes
+        data.push(5); // channel_idx
+        data.push(2); // path_len
+        data.push(0); // txt_type
+        data.extend_from_slice(&1234567890u32.to_le_bytes());
+        data.extend_from_slice(b"V3 chan");
+
+        let msg = parse_channel_msg_v3(&data).unwrap();
+        assert_eq!(msg.snr, Some(10.0));
+        assert_eq!(msg.channel_idx, 5);
+        assert_eq!(msg.path_len, 2);
+        assert_eq!(msg.text, "V3 chan");
+    }
+
+    #[test]
+    fn test_parse_channel_msg_v3_too_short() {
+        let data = vec![0u8; 8];
+        assert!(parse_channel_msg_v3(&data).is_err());
     }
 
     #[test]
