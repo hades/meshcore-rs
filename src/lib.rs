@@ -68,7 +68,7 @@ mod meshcore;
 pub use error::Error;
 pub use events::{
     ChannelMessage, ContactMessage, EventDispatcher, EventPayload, EventType, MeshCoreEvent,
-    Subscription,
+    MsgSentInfo, Subscription,
 };
 pub use meshcore::MeshCore;
 pub use packets::{AnonReqType, BinaryReqType, ControlType, PacketType};

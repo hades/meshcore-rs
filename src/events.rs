@@ -1158,6 +1158,39 @@ mod tests {
     }
 
     #[test]
+    fn test_contact_message_message_id() {
+        let msg = ContactMessage {
+            sender_prefix: [0x01, 0x02, 0x03, 0x04, 0x05, 0x06],
+            path_len: 2,
+            txt_type: 1,
+            sender_timestamp: 0x12345678,
+            text: "Hello".to_string(),
+            snr: None,
+            signature: None,
+        };
+
+        let id = msg.message_id();
+        // First 4 bytes of sender_prefix + timestamp bytes
+        // 0x01020304 | 0x12345678 as big-endian
+        assert_eq!(id, 0x0102030412345678);
+    }
+
+    #[test]
+    fn test_contact_message_sender_prefix_hex() {
+        let msg = ContactMessage {
+            sender_prefix: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF],
+            path_len: 0,
+            txt_type: 0,
+            sender_timestamp: 0,
+            text: "".to_string(),
+            snr: None,
+            signature: None,
+        };
+
+        assert_eq!(msg.sender_prefix_hex(), "aabbccddeeff");
+    }
+
+    #[test]
     fn test_channel_message_clone() {
         let msg = ChannelMessage {
             channel_idx: 5,
@@ -1171,6 +1204,23 @@ mod tests {
         let cloned = msg.clone();
         assert_eq!(cloned.channel_idx, 5);
         assert_eq!(cloned.text, "Channel msg");
+    }
+
+    #[test]
+    fn test_channel_message_message_id() {
+        let msg = ChannelMessage {
+            channel_idx: 5,
+            path_len: 1,
+            txt_type: 0,
+            sender_timestamp: 0x12345678,
+            text: "".to_string(),
+            snr: None,
+        };
+
+        let id = msg.message_id();
+        // channel_idx in first byte, timestamp in last 4 bytes
+        // 0x05_00_00_00_12345678
+        assert_eq!(id, 0x0500000012345678);
     }
 
     #[test]
