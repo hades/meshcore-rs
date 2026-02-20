@@ -754,7 +754,7 @@ mod tests {
     async fn test_handle_rx_contact_start() {
         let (reader, _dispatcher) = create_reader();
 
-        // Add some dummy contacts
+        // Add some fake contacts
         reader.pending_contacts.write().await.push(Contact {
             public_key: [0u8; 32],
             contact_type: 1,
@@ -1762,7 +1762,7 @@ mod tests {
         let (reader, dispatcher) = create_reader();
         let mut receiver = dispatcher.receiver();
 
-        // Start contact list
+        // Start the contact list
         reader
             .handle_rx(vec![PacketType::ContactStart as u8])
             .await
@@ -1981,7 +1981,7 @@ mod tests {
 
         let mut data = vec![PacketType::ControlData as u8];
         data.push(ControlType::NodeDiscoverResp as u8);
-        // Entry: 32 bytes pubkey + 32 bytes name
+        // Entry: 32 bytes pubkey + 32 byte name
         let mut entry = vec![0u8; 64];
         entry[0..6].copy_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
         entry[32..37].copy_from_slice(b"Node1");
