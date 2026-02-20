@@ -2,8 +2,8 @@
 
 use crate::error::Error;
 use crate::events::{
-    AclEntry, ChannelMessage, Contact, ContactMessage, MmaEntry, Neighbour, NeighboursData,
-    SelfInfo, StatusData,
+    AclEntry, ChannelMessage, Contact, ContactMessage, DeviceInfoData, MmaEntry, Neighbour,
+    NeighboursData, SelfInfo, StatusData,
 };
 use crate::Result;
 
@@ -187,6 +187,100 @@ pub fn parse_self_info(data: &[u8]) -> Result<SelfInfo> {
         cr,
         name,
     })
+}
+
+/// Parse device info response
+///
+/// Format (after response code byte):
+/// - Byte 0: Firmware version code
+/// - Byte 1: Max contacts / 2 (v3+)
+/// - Byte 2: Max channels (v3+)
+/// - Bytes 3-6: BLE PIN (u32 LE, v3+)
+/// - Bytes 7-18: Firmware build date (12 bytes, null-terminated, v3+)
+/// - Bytes 19-58: Model/manufacturer (40 bytes, null-terminated, v3+)
+/// - Bytes 59-78: Version string (20 bytes, null-terminated, v3+)
+/// - Byte 79: Repeat setting (v9+)
+pub fn parse_device_info(data: &[u8]) -> DeviceInfoData {
+    // Minimum: 1 byte for fw_version_code
+    if data.is_empty() {
+        return DeviceInfoData {
+            fw_version_code: 0,
+            max_contacts: None,
+            max_channels: None,
+            ble_pin: None,
+            fw_build: None,
+            model: None,
+            version: None,
+            repeat: None,
+        };
+    }
+
+    let fw_version_code = data[0];
+
+    // Version 3+ fields require fw_version_code >= 3 and sufficient data
+    if fw_version_code < 3 || data.len() < 2 {
+        return DeviceInfoData {
+            fw_version_code,
+            max_contacts: None,
+            max_channels: None,
+            ble_pin: None,
+            fw_build: None,
+            model: None,
+            version: None,
+            repeat: None,
+        };
+    }
+
+    // Parse v3+ fields
+    let max_contacts = if data.len() > 1 {
+        Some(data[1].saturating_mul(2))
+    } else {
+        None
+    };
+
+    let max_channels = if data.len() > 2 { Some(data[2]) } else { None };
+
+    let ble_pin = if data.len() >= 7 {
+        read_u32_le(data, 3).ok()
+    } else {
+        None
+    };
+
+    let fw_build = if data.len() >= 19 {
+        Some(read_string(data, 7, 12))
+    } else {
+        None
+    };
+
+    let model = if data.len() >= 59 {
+        Some(read_string(data, 19, 40))
+    } else {
+        None
+    };
+
+    let version = if data.len() >= 79 {
+        Some(read_string(data, 59, 20))
+    } else {
+        None
+    };
+
+    // v9+ repeat field
+    let repeat = if data.len() >= 80 {
+        Some(data[79] != 0)
+    } else {
+        None
+    };
+
+    DeviceInfoData {
+        fw_version_code,
+        max_contacts,
+        max_channels,
+        ble_pin,
+        fw_build,
+        model,
+        version,
+        repeat,
+    }
 }
 
 /// Parse status response (52+ bytes)
@@ -1002,5 +1096,98 @@ mod tests {
     fn test_parse_mma_empty() {
         let entries = parse_mma(&[]);
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_parse_device_info_empty() {
+        let info = parse_device_info(&[]);
+        assert_eq!(info.fw_version_code, 0);
+        assert!(info.max_contacts.is_none());
+        assert!(info.model.is_none());
+    }
+
+    #[test]
+    fn test_parse_device_info_v2() {
+        // Pre-v3 firmware only has version code
+        let data = [2u8]; // fw_version_code = 2
+        let info = parse_device_info(&data);
+        assert_eq!(info.fw_version_code, 2);
+        assert!(info.max_contacts.is_none());
+        assert!(info.max_channels.is_none());
+        assert!(info.ble_pin.is_none());
+    }
+
+    #[test]
+    fn test_parse_device_info_v3_partial() {
+        // v3+ but not all fields present
+        let mut data = vec![0u8; 10];
+        data[0] = 3; // fw_version_code
+        data[1] = 25; // max_contacts / 2
+        data[2] = 4; // max_channels
+        data[3..7].copy_from_slice(&5678u32.to_le_bytes()); // ble_pin
+
+        let info = parse_device_info(&data);
+        assert_eq!(info.fw_version_code, 3);
+        assert_eq!(info.max_contacts, Some(50)); // 25 * 2
+        assert_eq!(info.max_channels, Some(4));
+        assert_eq!(info.ble_pin, Some(5678));
+        assert!(info.fw_build.is_none()); // Not enough data
+        assert!(info.model.is_none());
+        assert!(info.version.is_none());
+        assert!(info.repeat.is_none());
+    }
+
+    #[test]
+    fn test_parse_device_info_full() {
+        // Full v9+ device info
+        let mut data = vec![0u8; 80];
+        data[0] = 9; // fw_version_code
+        data[1] = 50; // max_contacts / 2 = 100
+        data[2] = 8; // max_channels
+        data[3..7].copy_from_slice(&1234u32.to_le_bytes()); // ble_pin
+
+        // fw_build at offset 7 (12 bytes)
+        data[7..18].copy_from_slice(b"Feb 15 2025");
+
+        // model at offset 19 (40 bytes)
+        data[19..29].copy_from_slice(b"T-Deck Pro");
+
+        // version at offset 59 (20 bytes)
+        data[59..64].copy_from_slice(b"1.2.3");
+
+        // repeat at offset 79
+        data[79] = 1;
+
+        let info = parse_device_info(&data);
+        assert_eq!(info.fw_version_code, 9);
+        assert_eq!(info.max_contacts, Some(100));
+        assert_eq!(info.max_channels, Some(8));
+        assert_eq!(info.ble_pin, Some(1234));
+        assert_eq!(info.fw_build.as_deref(), Some("Feb 15 2025"));
+        assert_eq!(info.model.as_deref(), Some("T-Deck Pro"));
+        assert_eq!(info.version.as_deref(), Some("1.2.3"));
+        assert_eq!(info.repeat, Some(true));
+    }
+
+    #[test]
+    fn test_parse_device_info_repeat_false() {
+        let mut data = vec![0u8; 80];
+        data[0] = 9;
+        data[79] = 0; // repeat disabled
+
+        let info = parse_device_info(&data);
+        assert_eq!(info.repeat, Some(false));
+    }
+
+    #[test]
+    fn test_parse_device_info_max_contacts_overflow() {
+        // Test that max_contacts * 2 doesn't overflow
+        let mut data = vec![0u8; 3];
+        data[0] = 3;
+        data[1] = 200; // 200 * 2 = 400, but u8 max is 255, so saturates to 255
+
+        let info = parse_device_info(&data);
+        // 200 * 2 would overflow u8, but we use saturating_mul
+        assert_eq!(info.max_contacts, Some(255)); // Saturated
     }
 }

@@ -204,7 +204,7 @@ impl Contact {
 }
 
 /// Device self-info
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SelfInfo {
     /// Advertisement type
     pub adv_type: u8,
@@ -243,10 +243,24 @@ pub struct SelfInfo {
 }
 
 /// Device info/capabilities
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DeviceInfoData {
-    /// Raw device info bytes
-    pub raw: Vec<u8>,
+    /// Firmware version code
+    pub fw_version_code: u8,
+    /// Maximum contacts (multiplied by 2 from raw value, v3+)
+    pub max_contacts: Option<u8>,
+    /// Maximum group channels (v3+)
+    pub max_channels: Option<u8>,
+    /// BLE PIN code (v3+)
+    pub ble_pin: Option<u32>,
+    /// Firmware build date string (e.g., "Feb 15 2025", v3+)
+    pub fw_build: Option<String>,
+    /// Device model/manufacturer name (v3+)
+    pub model: Option<String>,
+    /// Firmware version string (e.g., "1.2.3", v3+)
+    pub version: Option<String>,
+    /// Repeat/relay mode enabled (v9+)
+    pub repeat: Option<bool>,
 }
 
 /// Battery information

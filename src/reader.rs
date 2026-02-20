@@ -154,11 +154,10 @@ impl MessageReader {
             }
 
             PacketType::DeviceInfo => {
+                let device_info = parse_device_info(payload);
                 let event = MeshCoreEvent::new(
                     EventType::DeviceInfo,
-                    EventPayload::DeviceInfo(DeviceInfoData {
-                        raw: payload.to_vec(),
-                    }),
+                    EventPayload::DeviceInfo(device_info),
                 );
                 self.dispatcher.emit(event).await;
             }
@@ -1171,12 +1170,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_rx_device_info() {
+    async fn test_handle_rx_device_info_minimal() {
         let (reader, dispatcher) = create_reader();
         let mut receiver = dispatcher.receiver();
 
+        // Minimal device info: just fw_version_code
         let mut data = vec![PacketType::DeviceInfo as u8];
-        data.extend_from_slice(&[0x01, 0x02, 0x03, 0x04]);
+        data.push(0x02); // fw_version_code = 2 (pre-v3)
 
         reader.handle_rx(data).await.unwrap();
 
@@ -1188,7 +1188,62 @@ mod tests {
         assert_eq!(event.event_type, EventType::DeviceInfo);
         match event.payload {
             EventPayload::DeviceInfo(info) => {
-                assert_eq!(info.raw, vec![0x01, 0x02, 0x03, 0x04]);
+                assert_eq!(info.fw_version_code, 0x02);
+                assert!(info.max_contacts.is_none());
+                assert!(info.model.is_none());
+            }
+            _ => panic!("Expected DeviceInfo payload"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handle_rx_device_info_full() {
+        let (reader, dispatcher) = create_reader();
+        let mut receiver = dispatcher.receiver();
+
+        let mut data = vec![PacketType::DeviceInfo as u8];
+        // Build a full v3+ device info payload
+        data.push(9); // fw_version_code (v9+)
+        data.push(50); // max_contacts / 2 = 50, so max_contacts = 100
+        data.push(8); // max_channels
+        data.extend_from_slice(&1234u32.to_le_bytes()); // ble_pin
+
+        // fw_build (12 bytes)
+        let mut fw_build = [0u8; 12];
+        fw_build[..11].copy_from_slice(b"Feb 15 2025");
+        data.extend_from_slice(&fw_build);
+
+        // model (40 bytes)
+        let mut model = [0u8; 40];
+        model[..10].copy_from_slice(b"T-Deck Pro");
+        data.extend_from_slice(&model);
+
+        // version (20 bytes)
+        let mut version = [0u8; 20];
+        version[..5].copy_from_slice(b"1.2.3");
+        data.extend_from_slice(&version);
+
+        // repeat (1 byte)
+        data.push(1); // repeat enabled
+
+        reader.handle_rx(data).await.unwrap();
+
+        let event = tokio::time::timeout(Duration::from_millis(100), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(event.event_type, EventType::DeviceInfo);
+        match event.payload {
+            EventPayload::DeviceInfo(info) => {
+                assert_eq!(info.fw_version_code, 9);
+                assert_eq!(info.max_contacts, Some(100));
+                assert_eq!(info.max_channels, Some(8));
+                assert_eq!(info.ble_pin, Some(1234));
+                assert_eq!(info.fw_build.as_deref(), Some("Feb 15 2025"));
+                assert_eq!(info.model.as_deref(), Some("T-Deck Pro"));
+                assert_eq!(info.version.as_deref(), Some("1.2.3"));
+                assert_eq!(info.repeat, Some(true));
             }
             _ => panic!("Expected DeviceInfo payload"),
         }
