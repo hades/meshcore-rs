@@ -281,11 +281,11 @@ impl MessageReader {
             }
 
             PacketType::ChannelInfo => {
-                if payload.len() >= 18 {
+                if payload.len() >= 33 {
                     let channel_idx = payload[0];
-                    let name = read_string(payload, 1, 16);
-                    let secret: [u8; 16] = if payload.len() >= 33 {
-                        read_bytes(payload, 17).unwrap_or([0; 16])
+                    let name = read_string(payload, 1, 32);
+                    let secret: [u8; 16] = if payload.len() >= 49 {
+                        read_bytes(payload, 33).unwrap_or([0; 16])
                     } else {
                         [0; 16]
                     };
@@ -1500,7 +1500,7 @@ mod tests {
 
         let mut data = vec![PacketType::ChannelInfo as u8];
         data.push(1); // channel_idx
-        let mut name = [0u8; 16];
+        let mut name = [0u8; 32];
         name[..7].copy_from_slice(b"General");
         data.extend_from_slice(&name);
         data.extend_from_slice(&[0xAA; 16]); // secret
@@ -1530,10 +1530,10 @@ mod tests {
 
         let mut data = vec![PacketType::ChannelInfo as u8];
         data.push(2); // channel_idx
-        let mut name = [0u8; 17]; // 17 bytes to meet the 18-byte minimum (1 idx + 17 name)
+        let mut name = [0u8; 32]; // 32 bytes to meet the 33-byte minimum (1 idx + 32 name)
         name[..4].copy_from_slice(b"Test");
         data.extend_from_slice(&name);
-        // No secret provided - payload is exactly 18 bytes
+        // No secret provided - payload is exactly 33 bytes
 
         reader.handle_rx(data).await.unwrap();
 
