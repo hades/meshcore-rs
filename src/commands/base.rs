@@ -453,6 +453,7 @@ impl CommandHandler {
     /// Set channel
     ///
     /// Format: [CMD_SET_CHANNEL=0x20][channel_idx][name: CHANNEL_NAME_LEN bytes][secret: CHANNEL_SECRET_LEN bytes]
+    /// Note: name is null-terminated, so max usable length is CHANNEL_NAME_LEN - 1 bytes
     pub async fn set_channel(
         &self,
         channel_idx: u8,
@@ -460,10 +461,12 @@ impl CommandHandler {
         secret: &[u8; CHANNEL_SECRET_LEN],
     ) -> Result<()> {
         let mut data = vec![CMD_SET_CHANNEL, channel_idx];
-        // Pad or truncate name to CHANNEL_NAME_LEN bytes
+        // Pad or truncate name to CHANNEL_NAME_LEN bytes, reserving last byte for null terminator
         let mut name_bytes = [0u8; CHANNEL_NAME_LEN];
-        let name_len = name.len().min(CHANNEL_NAME_LEN);
+        // Max usable length is CHANNEL_NAME_LEN - 1 to ensure null termination
+        let name_len = name.len().min(CHANNEL_NAME_LEN - 1);
         name_bytes[..name_len].copy_from_slice(&name.as_bytes()[..name_len]);
+        // name_bytes[name_len..] is already zero (null terminator guaranteed)
         data.extend_from_slice(&name_bytes);
         data.extend_from_slice(secret);
         self.send(&data, Some(EventType::Ok)).await?;
@@ -1717,20 +1720,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_set_channel_name_truncation() {
+    async fn test_set_channel_name_truncation_with_null_terminator() {
         let (handler, mut rx, dispatcher) = create_test_handler();
 
         let dispatcher_clone = dispatcher.clone();
         tokio::spawn(async move {
             let sent = rx.recv().await.unwrap();
             assert_eq!(sent[0], CMD_SET_CHANNEL);
-            // Verify name is truncated to CHANNEL_NAME_LEN bytes
+            // Verify total length is correct
             assert_eq!(sent.len(), 1 + 1 + CHANNEL_NAME_LEN + CHANNEL_SECRET_LEN);
-            // Name should be truncated - first 32 bytes of the long name
-            let expected_name = b"This is a very long channel name";
+            // Name should be truncated to CHANNEL_NAME_LEN - 1 bytes to leave room for null
+            let expected_name = b"This is a very long channel nam"; // 31 bytes
             assert_eq!(
-                &sent[2..2 + CHANNEL_NAME_LEN],
-                &expected_name[..CHANNEL_NAME_LEN]
+                &sent[2..2 + CHANNEL_NAME_LEN - 1],
+                &expected_name[..CHANNEL_NAME_LEN - 1]
+            );
+            // Last byte of name field must be null terminator
+            assert_eq!(
+                sent[2 + CHANNEL_NAME_LEN - 1],
+                0,
+                "Last byte of name field must be null terminator"
             );
 
             dispatcher_clone
@@ -1739,7 +1748,7 @@ mod tests {
         });
 
         let secret = [0xBB; CHANNEL_SECRET_LEN];
-        // Name longer than CHANNEL_NAME_LEN should be truncated
+        // Name longer than CHANNEL_NAME_LEN - 1 should be truncated to ensure null termination
         let long_name = "This is a very long channel name that exceeds the limit";
         let result = handler.set_channel(2, long_name, &secret).await;
         assert!(result.is_ok());
