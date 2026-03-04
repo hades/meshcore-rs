@@ -9,8 +9,7 @@ use crate::events::*;
 use crate::packets::BinaryReqType;
 use crate::parsing::{hex_decode, hex_encode, to_microdegrees};
 use crate::reader::MessageReader;
-use crate::Error;
-use crate::Result;
+use crate::{Error, Result, CHANNEL_NAME_LEN, CHANNEL_SECRET_LEN};
 
 /// Default command timeout
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -453,12 +452,17 @@ impl CommandHandler {
 
     /// Set channel
     ///
-    /// Format: [CMD_SET_CHANNEL=0x20][channel_idx][name: 32 bytes][secret: 16 bytes]
-    pub async fn set_channel(&self, channel_idx: u8, name: &str, secret: &[u8; 16]) -> Result<()> {
+    /// Format: [CMD_SET_CHANNEL=0x20][channel_idx][name: CHANNEL_NAME_LEN bytes][secret: CHANNEL_SECRET_LEN bytes]
+    pub async fn set_channel(
+        &self,
+        channel_idx: u8,
+        name: &str,
+        secret: &[u8; CHANNEL_SECRET_LEN],
+    ) -> Result<()> {
         let mut data = vec![CMD_SET_CHANNEL, channel_idx];
-        // Pad or truncate name to 32 bytes
-        let mut name_bytes = [0u8; 32];
-        let name_len = name.len().min(32);
+        // Pad or truncate name to CHANNEL_NAME_LEN bytes
+        let mut name_bytes = [0u8; CHANNEL_NAME_LEN];
+        let name_len = name.len().min(CHANNEL_NAME_LEN);
         name_bytes[..name_len].copy_from_slice(&name.as_bytes()[..name_len]);
         data.extend_from_slice(&name_bytes);
         data.extend_from_slice(secret);

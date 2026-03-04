@@ -65,6 +65,14 @@ pub mod reader;
 
 mod meshcore;
 
+// Protocol constants
+/// Length of channel name field in bytes
+pub const CHANNEL_NAME_LEN: usize = 32;
+/// Length of channel secret field in bytes
+pub const CHANNEL_SECRET_LEN: usize = 16;
+/// Total length of channel info payload (idx + name + secret)
+pub const CHANNEL_INFO_LEN: usize = 1 + CHANNEL_NAME_LEN + CHANNEL_SECRET_LEN;
+
 pub use error::Error;
 pub use events::{
     ChannelMessage, ContactMessage, EventDispatcher, EventPayload, EventType, MeshCoreEvent,

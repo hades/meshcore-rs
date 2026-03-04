@@ -8,7 +8,7 @@ use tokio::sync::RwLock;
 use crate::events::*;
 use crate::packets::{BinaryReqType, ControlType, PacketType};
 use crate::parsing::*;
-use crate::Result;
+use crate::{Result, CHANNEL_INFO_LEN, CHANNEL_NAME_LEN, CHANNEL_SECRET_LEN};
 
 /// Tracks a pending binary request
 #[derive(Debug, Clone)]
@@ -281,11 +281,13 @@ impl MessageReader {
             }
 
             PacketType::ChannelInfo => {
-                // Firmware always sends 49 bytes: 1 (idx) + 32 (name) + 16 (secret)
-                if payload.len() >= 49 {
+                // Firmware always sends CHANNEL_INFO_LEN bytes: 1 (idx) + name + secret
+                if payload.len() >= CHANNEL_INFO_LEN {
                     let channel_idx = payload[0];
-                    let name = read_string(payload, 1, 32);
-                    let secret: [u8; 16] = read_bytes(payload, 33).unwrap_or([0; 16]);
+                    let name = read_string(payload, 1, CHANNEL_NAME_LEN);
+                    let secret: [u8; CHANNEL_SECRET_LEN] =
+                        read_bytes(payload, 1 + CHANNEL_NAME_LEN)
+                            .unwrap_or([0; CHANNEL_SECRET_LEN]);
 
                     let event = MeshCoreEvent::new(
                         EventType::ChannelInfo,
@@ -1497,10 +1499,10 @@ mod tests {
 
         let mut data = vec![PacketType::ChannelInfo as u8];
         data.push(1); // channel_idx
-        let mut name = [0u8; 32];
+        let mut name = [0u8; CHANNEL_NAME_LEN];
         name[..7].copy_from_slice(b"General");
         data.extend_from_slice(&name);
-        data.extend_from_slice(&[0xAA; 16]); // secret
+        data.extend_from_slice(&[0xAA; CHANNEL_SECRET_LEN]); // secret
 
         reader.handle_rx(data).await.unwrap();
 
@@ -1514,7 +1516,7 @@ mod tests {
             EventPayload::ChannelInfo(info) => {
                 assert_eq!(info.channel_idx, 1);
                 assert_eq!(info.name, "General");
-                assert_eq!(info.secret, [0xAA; 16]);
+                assert_eq!(info.secret, [0xAA; CHANNEL_SECRET_LEN]);
             }
             _ => panic!("Expected ChannelInfo payload"),
         }
@@ -1527,10 +1529,10 @@ mod tests {
 
         let mut data = vec![PacketType::ChannelInfo as u8];
         data.push(2); // channel_idx
-        let mut name = [0u8; 32];
+        let mut name = [0u8; CHANNEL_NAME_LEN];
         name[..4].copy_from_slice(b"Test");
         data.extend_from_slice(&name);
-        data.extend_from_slice(&[0u8; 16]); // zero secret
+        data.extend_from_slice(&[0u8; CHANNEL_SECRET_LEN]); // zero secret
 
         reader.handle_rx(data).await.unwrap();
 
@@ -1544,7 +1546,7 @@ mod tests {
             EventPayload::ChannelInfo(info) => {
                 assert_eq!(info.channel_idx, 2);
                 assert_eq!(info.name, "Test");
-                assert_eq!(info.secret, [0; 16]);
+                assert_eq!(info.secret, [0; CHANNEL_SECRET_LEN]);
             }
             _ => panic!("Expected ChannelInfo payload"),
         }
