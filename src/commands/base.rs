@@ -9,8 +9,7 @@ use crate::events::*;
 use crate::packets::BinaryReqType;
 use crate::parsing::{hex_decode, hex_encode, to_microdegrees};
 use crate::reader::MessageReader;
-use crate::Error;
-use crate::Result;
+use crate::{Error, Result, CHANNEL_NAME_LEN, CHANNEL_SECRET_LEN};
 
 /// Default command timeout
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -454,13 +453,21 @@ impl CommandHandler {
 
     /// Set channel
     ///
-    /// Format: [CMD_SET_CHANNEL=0x20][channel_idx][name: 16 bytes][secret: 16 bytes]
-    pub async fn set_channel(&self, channel_idx: u8, name: &str, secret: &[u8; 16]) -> Result<()> {
+    /// Format: [CMD_SET_CHANNEL=0x20][channel_idx][name: CHANNEL_NAME_LEN bytes][secret: CHANNEL_SECRET_LEN bytes]
+    /// Note: name is null-terminated, so max usable length is CHANNEL_NAME_LEN - 1 bytes
+    pub async fn set_channel(
+        &self,
+        channel_idx: u8,
+        name: &str,
+        secret: &[u8; CHANNEL_SECRET_LEN],
+    ) -> Result<()> {
         let mut data = vec![CMD_SET_CHANNEL, channel_idx];
-        // Pad or truncate name to 16 bytes
-        let mut name_bytes = [0u8; 16];
-        let name_len = name.len().min(16);
+        // Pad or truncate name to CHANNEL_NAME_LEN bytes, reserving last byte for null terminator
+        let mut name_bytes = [0u8; CHANNEL_NAME_LEN];
+        // Max usable length is CHANNEL_NAME_LEN - 1 to ensure null termination
+        let name_len = name.len().min(CHANNEL_NAME_LEN - 1);
         name_bytes[..name_len].copy_from_slice(&name.as_bytes()[..name_len]);
+        // name_bytes[name_len..] is already zero (null terminator guaranteed)
         data.extend_from_slice(&name_bytes);
         data.extend_from_slice(secret);
         self.send(&data, Some(EventType::Ok)).await?;
@@ -1697,6 +1704,69 @@ mod tests {
         let result = handler.get_channel(0).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().name, "General");
+    }
+
+    #[tokio::test]
+    async fn test_set_channel_success() {
+        let (handler, mut rx, dispatcher) = create_test_handler();
+
+        let dispatcher_clone = dispatcher.clone();
+        tokio::spawn(async move {
+            let sent = rx.recv().await.unwrap();
+            assert_eq!(sent[0], CMD_SET_CHANNEL);
+            assert_eq!(sent[1], 1); // channel_idx
+                                    // Verify name is padded to CHANNEL_NAME_LEN bytes
+            assert_eq!(sent.len(), 1 + 1 + CHANNEL_NAME_LEN + CHANNEL_SECRET_LEN);
+            // Check name starts with "Test"
+            assert_eq!(&sent[2..6], b"Test");
+            // Check rest of name is zero-padded
+            assert!(sent[6..2 + CHANNEL_NAME_LEN].iter().all(|&b| b == 0));
+            // Check secret
+            assert_eq!(&sent[2 + CHANNEL_NAME_LEN..], &[0xAA; CHANNEL_SECRET_LEN]);
+
+            dispatcher_clone
+                .emit(MeshCoreEvent::new(EventType::Ok, EventPayload::None))
+                .await;
+        });
+
+        let secret = [0xAA; CHANNEL_SECRET_LEN];
+        let result = handler.set_channel(1, "Test", &secret).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_channel_name_truncation_with_null_terminator() {
+        let (handler, mut rx, dispatcher) = create_test_handler();
+
+        let dispatcher_clone = dispatcher.clone();
+        tokio::spawn(async move {
+            let sent = rx.recv().await.unwrap();
+            assert_eq!(sent[0], CMD_SET_CHANNEL);
+            // Verify total length is correct
+            assert_eq!(sent.len(), 1 + 1 + CHANNEL_NAME_LEN + CHANNEL_SECRET_LEN);
+            // Name should be truncated to CHANNEL_NAME_LEN - 1 bytes to leave room for null
+            let expected_name = b"This is a very long channel nam"; // 31 bytes
+            assert_eq!(
+                &sent[2..2 + CHANNEL_NAME_LEN - 1],
+                &expected_name[..CHANNEL_NAME_LEN - 1]
+            );
+            // Last byte of name field must be null terminator
+            assert_eq!(
+                sent[2 + CHANNEL_NAME_LEN - 1],
+                0,
+                "Last byte of name field must be null terminator"
+            );
+
+            dispatcher_clone
+                .emit(MeshCoreEvent::new(EventType::Ok, EventPayload::None))
+                .await;
+        });
+
+        let secret = [0xBB; CHANNEL_SECRET_LEN];
+        // Name longer than CHANNEL_NAME_LEN - 1 should be truncated to ensure null termination
+        let long_name = "This is a very long channel name that exceeds the limit";
+        let result = handler.set_channel(2, long_name, &secret).await;
+        assert!(result.is_ok());
     }
 
     #[tokio::test]

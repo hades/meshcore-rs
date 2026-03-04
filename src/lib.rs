@@ -65,6 +65,14 @@ pub mod reader;
 
 mod meshcore;
 
+// Protocol constants
+/// Length of channel name field in bytes
+pub const CHANNEL_NAME_LEN: usize = 32;
+/// Length of channel secret field in bytes
+pub const CHANNEL_SECRET_LEN: usize = 16;
+/// Total length of channel info payload (idx + name + secret)
+pub const CHANNEL_INFO_LEN: usize = 1 + CHANNEL_NAME_LEN + CHANNEL_SECRET_LEN;
+
 pub use error::Error;
 pub use events::{
     ChannelMessage, ContactMessage, EventDispatcher, EventPayload, EventType, MeshCoreEvent,
@@ -75,3 +83,25 @@ pub use packets::{AnonReqType, BinaryReqType, ControlType, PacketType};
 
 /// Result type alias using the library's Error type
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_channel_name_len() {
+        assert_eq!(CHANNEL_NAME_LEN, 32);
+    }
+
+    #[test]
+    fn test_channel_secret_len() {
+        assert_eq!(CHANNEL_SECRET_LEN, 16);
+    }
+
+    #[test]
+    fn test_channel_info_len() {
+        // 1 byte idx + 32 bytes name + 16 bytes secret = 49
+        assert_eq!(CHANNEL_INFO_LEN, 49);
+        assert_eq!(CHANNEL_INFO_LEN, 1 + CHANNEL_NAME_LEN + CHANNEL_SECRET_LEN);
+    }
+}

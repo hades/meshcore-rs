@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
+use crate::CHANNEL_SECRET_LEN;
+
 /// Event types emitted by MeshCore
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventType {
@@ -415,8 +417,8 @@ pub struct ChannelInfoData {
     pub channel_idx: u8,
     /// Channel name
     pub name: String,
-    /// Channel secret (16 bytes)
-    pub secret: [u8; 16],
+    /// Channel secret (CHANNEL_SECRET_LEN bytes)
+    pub secret: [u8; CHANNEL_SECRET_LEN],
 }
 
 /// Advertisement data
@@ -1352,7 +1354,7 @@ mod tests {
         let info = ChannelInfoData {
             channel_idx: 1,
             name: "General".to_string(),
-            secret: [0xAA; 16],
+            secret: [0xAA; CHANNEL_SECRET_LEN],
         };
         let cloned = info.clone();
         assert_eq!(cloned.channel_idx, 1);

@@ -8,7 +8,7 @@ use tokio::sync::RwLock;
 use crate::events::*;
 use crate::packets::{BinaryReqType, ControlType, PacketType};
 use crate::parsing::*;
-use crate::Result;
+use crate::{Result, CHANNEL_INFO_LEN, CHANNEL_NAME_LEN, CHANNEL_SECRET_LEN};
 
 /// Tracks a pending binary request
 #[derive(Debug, Clone)]
@@ -281,14 +281,13 @@ impl MessageReader {
             }
 
             PacketType::ChannelInfo => {
-                if payload.len() >= 18 {
+                // Firmware always sends CHANNEL_INFO_LEN bytes: 1 (idx) + name + secret
+                if payload.len() >= CHANNEL_INFO_LEN {
                     let channel_idx = payload[0];
-                    let name = read_string(payload, 1, 16);
-                    let secret: [u8; 16] = if payload.len() >= 33 {
-                        read_bytes(payload, 17).unwrap_or([0; 16])
-                    } else {
-                        [0; 16]
-                    };
+                    let name = read_string(payload, 1, CHANNEL_NAME_LEN);
+                    let secret: [u8; CHANNEL_SECRET_LEN] =
+                        read_bytes(payload, 1 + CHANNEL_NAME_LEN)
+                            .unwrap_or([0; CHANNEL_SECRET_LEN]);
 
                     let event = MeshCoreEvent::new(
                         EventType::ChannelInfo,
@@ -1500,10 +1499,10 @@ mod tests {
 
         let mut data = vec![PacketType::ChannelInfo as u8];
         data.push(1); // channel_idx
-        let mut name = [0u8; 16];
+        let mut name = [0u8; CHANNEL_NAME_LEN];
         name[..7].copy_from_slice(b"General");
         data.extend_from_slice(&name);
-        data.extend_from_slice(&[0xAA; 16]); // secret
+        data.extend_from_slice(&[0xAA; CHANNEL_SECRET_LEN]); // secret
 
         reader.handle_rx(data).await.unwrap();
 
@@ -1517,23 +1516,23 @@ mod tests {
             EventPayload::ChannelInfo(info) => {
                 assert_eq!(info.channel_idx, 1);
                 assert_eq!(info.name, "General");
-                assert_eq!(info.secret, [0xAA; 16]);
+                assert_eq!(info.secret, [0xAA; CHANNEL_SECRET_LEN]);
             }
             _ => panic!("Expected ChannelInfo payload"),
         }
     }
 
     #[tokio::test]
-    async fn test_handle_rx_channel_info_no_secret() {
+    async fn test_handle_rx_channel_info_zero_secret() {
         let (reader, dispatcher) = create_reader();
         let mut receiver = dispatcher.receiver();
 
         let mut data = vec![PacketType::ChannelInfo as u8];
         data.push(2); // channel_idx
-        let mut name = [0u8; 17]; // 17 bytes to meet the 18-byte minimum (1 idx + 17 name)
+        let mut name = [0u8; CHANNEL_NAME_LEN];
         name[..4].copy_from_slice(b"Test");
         data.extend_from_slice(&name);
-        // No secret provided - payload is exactly 18 bytes
+        data.extend_from_slice(&[0u8; CHANNEL_SECRET_LEN]); // zero secret
 
         reader.handle_rx(data).await.unwrap();
 
@@ -1546,7 +1545,60 @@ mod tests {
         match event.payload {
             EventPayload::ChannelInfo(info) => {
                 assert_eq!(info.channel_idx, 2);
-                assert_eq!(info.secret, [0; 16]); // default to zeros when not provided
+                assert_eq!(info.name, "Test");
+                assert_eq!(info.secret, [0; CHANNEL_SECRET_LEN]);
+            }
+            _ => panic!("Expected ChannelInfo payload"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handle_rx_channel_info_too_short() {
+        let (reader, dispatcher) = create_reader();
+        let mut receiver = dispatcher.receiver();
+
+        // Payload shorter than CHANNEL_INFO_LEN (49 bytes) should not emit event
+        let mut data = vec![PacketType::ChannelInfo as u8];
+        data.push(1); // channel_idx
+        let name = [0u8; CHANNEL_NAME_LEN];
+        data.extend_from_slice(&name);
+        // Missing secret - only 33 bytes total, need 49
+
+        reader.handle_rx(data).await.unwrap();
+
+        // Should timeout because no event is emitted for short payload
+        let result = tokio::time::timeout(Duration::from_millis(50), receiver.recv()).await;
+        assert!(result.is_err(), "Should not emit event for short payload");
+    }
+
+    #[tokio::test]
+    async fn test_handle_rx_channel_info_max_name_length() {
+        let (reader, dispatcher) = create_reader();
+        let mut receiver = dispatcher.receiver();
+
+        let mut data = vec![PacketType::ChannelInfo as u8];
+        data.push(3); // channel_idx
+                      // Fill name with 31 chars + null terminator
+        let mut name = [0u8; CHANNEL_NAME_LEN];
+        let long_name = b"This is a very long channel nam"; // 31 chars
+        name[..31].copy_from_slice(long_name);
+        data.extend_from_slice(&name);
+        data.extend_from_slice(&[0xBB; CHANNEL_SECRET_LEN]);
+
+        reader.handle_rx(data).await.unwrap();
+
+        let event = tokio::time::timeout(Duration::from_millis(100), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(event.event_type, EventType::ChannelInfo);
+        match event.payload {
+            EventPayload::ChannelInfo(info) => {
+                assert_eq!(info.channel_idx, 3);
+                assert_eq!(info.name, "This is a very long channel nam");
+                assert_eq!(info.name.len(), 31);
+                assert_eq!(info.secret, [0xBB; CHANNEL_SECRET_LEN]);
             }
             _ => panic!("Expected ChannelInfo payload"),
         }
