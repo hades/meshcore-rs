@@ -1354,7 +1354,7 @@ mod tests {
         let info = ChannelInfoData {
             channel_idx: 1,
             name: "General".to_string(),
-            secret: [0xAA; 16],
+            secret: [0xAA; CHANNEL_SECRET_LEN],
         };
         let cloned = info.clone();
         assert_eq!(cloned.channel_idx, 1);
