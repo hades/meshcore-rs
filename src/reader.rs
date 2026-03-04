@@ -281,14 +281,11 @@ impl MessageReader {
             }
 
             PacketType::ChannelInfo => {
-                if payload.len() >= 33 {
+                // Firmware always sends 49 bytes: 1 (idx) + 32 (name) + 16 (secret)
+                if payload.len() >= 49 {
                     let channel_idx = payload[0];
                     let name = read_string(payload, 1, 32);
-                    let secret: [u8; 16] = if payload.len() >= 49 {
-                        read_bytes(payload, 33).unwrap_or([0; 16])
-                    } else {
-                        [0; 16]
-                    };
+                    let secret: [u8; 16] = read_bytes(payload, 33).unwrap_or([0; 16]);
 
                     let event = MeshCoreEvent::new(
                         EventType::ChannelInfo,
@@ -1524,16 +1521,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_rx_channel_info_no_secret() {
+    async fn test_handle_rx_channel_info_zero_secret() {
         let (reader, dispatcher) = create_reader();
         let mut receiver = dispatcher.receiver();
 
         let mut data = vec![PacketType::ChannelInfo as u8];
         data.push(2); // channel_idx
-        let mut name = [0u8; 32]; // 32 bytes to meet the 33-byte minimum (1 idx + 32 name)
+        let mut name = [0u8; 32];
         name[..4].copy_from_slice(b"Test");
         data.extend_from_slice(&name);
-        // No secret provided - payload is exactly 33 bytes
+        data.extend_from_slice(&[0u8; 16]); // zero secret
 
         reader.handle_rx(data).await.unwrap();
 
@@ -1546,7 +1543,8 @@ mod tests {
         match event.payload {
             EventPayload::ChannelInfo(info) => {
                 assert_eq!(info.channel_idx, 2);
-                assert_eq!(info.secret, [0; 16]); // default to zeros when not provided
+                assert_eq!(info.name, "Test");
+                assert_eq!(info.secret, [0; 16]);
             }
             _ => panic!("Expected ChannelInfo payload"),
         }
