@@ -1566,7 +1566,7 @@ mod tests {
 
         reader.handle_rx(data).await.unwrap();
 
-        // Should the timeout because no event is emitted for a short payload
+        // This should timeout because no event is emitted for a short payload
         let result = tokio::time::timeout(Duration::from_millis(50), receiver.recv()).await;
         assert!(result.is_err(), "Should not emit event for short payload");
     }

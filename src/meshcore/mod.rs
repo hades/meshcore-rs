@@ -353,7 +353,6 @@ impl MeshCore {
 /// Format: `[START: 0x3c][LENGTH_L][LENGTH_H][PAYLOAD]`
 #[cfg(any(feature = "serial", feature = "tcp"))]
 pub(crate) fn frame_packet(data: &[u8]) -> Vec<u8> {
-    // TODO check for data.len() being excessively large - maybe a hack?
     // Frame has three header bytes and the data itself
     let frame_size = data.len().checked_add(3).unwrap_or_default();
     let mut framed = Vec::with_capacity(frame_size);
