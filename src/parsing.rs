@@ -9,7 +9,11 @@ use crate::Result;
 
 /// Read a little-endian u16 from a byte slice
 pub fn read_u16_le(data: &[u8], offset: usize) -> Result<u16> {
-    if offset + 2 > data.len() {
+    if offset
+        .checked_add(2)
+        .ok_or_else(|| Error::protocol("Offset overflow"))?
+        > data.len()
+    {
         return Err(Error::protocol("Buffer too short for u16"));
     }
     Ok(u16::from_le_bytes([data[offset], data[offset + 1]]))
@@ -17,7 +21,11 @@ pub fn read_u16_le(data: &[u8], offset: usize) -> Result<u16> {
 
 /// Read a little-endian i16 from a byte slice
 pub fn read_i16_le(data: &[u8], offset: usize) -> Result<i16> {
-    if offset + 2 > data.len() {
+    if offset
+        .checked_add(2)
+        .ok_or_else(|| Error::protocol("Offset overflow"))?
+        > data.len()
+    {
         return Err(Error::protocol("Buffer too short for i16"));
     }
     Ok(i16::from_le_bytes([data[offset], data[offset + 1]]))
@@ -25,7 +33,11 @@ pub fn read_i16_le(data: &[u8], offset: usize) -> Result<i16> {
 
 /// Read a little-endian u32 from a byte slice
 pub fn read_u32_le(data: &[u8], offset: usize) -> Result<u32> {
-    if offset + 4 > data.len() {
+    if offset
+        .checked_add(4)
+        .ok_or_else(|| Error::protocol("Offset overflow"))?
+        > data.len()
+    {
         return Err(Error::protocol("Buffer too short for u32"));
     }
     Ok(u32::from_le_bytes([
@@ -38,7 +50,11 @@ pub fn read_u32_le(data: &[u8], offset: usize) -> Result<u32> {
 
 /// Read a little-endian i32 from a byte slice
 pub fn read_i32_le(data: &[u8], offset: usize) -> Result<i32> {
-    if offset + 4 > data.len() {
+    if offset
+        .checked_add(4)
+        .ok_or_else(|| Error::protocol("Offset overflow"))?
+        > data.len()
+    {
         return Err(Error::protocol("Buffer too short for i32"));
     }
     Ok(i32::from_le_bytes([
@@ -64,7 +80,11 @@ pub fn read_string(data: &[u8], offset: usize, max_len: usize) -> String {
 
 /// Read a fixed-size byte array
 pub fn read_bytes<const N: usize>(data: &[u8], offset: usize) -> Result<[u8; N]> {
-    if offset + N > data.len() {
+    if offset
+        .checked_add(N)
+        .ok_or_else(|| Error::protocol("Offset overflow"))?
+        > data.len()
+    {
         return Err(Error::protocol(format!("Buffer too short for {} bytes", N)));
     }
     let mut arr = [0u8; N];
