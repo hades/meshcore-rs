@@ -6,10 +6,14 @@ use crate::events::*;
 use crate::packets::FRAME_START;
 use crate::reader::MessageReader;
 use crate::Result;
+#[cfg(any(feature = "serial", feature = "tcp"))]
+use bytes::BytesMut;
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(any(feature = "serial", feature = "tcp"))]
+use tokio::io::{AsyncRead, AsyncReadExt, ReadHalf};
 #[cfg(any(feature = "serial", feature = "ble", feature = "tcp"))]
 use tokio::sync::mpsc;
 use tokio::sync::{Mutex, RwLock};
@@ -349,13 +353,78 @@ impl MeshCore {
 /// Format: `[START: 0x3c][LENGTH_L][LENGTH_H][PAYLOAD]`
 #[cfg(any(feature = "serial", feature = "tcp"))]
 pub(crate) fn frame_packet(data: &[u8]) -> Vec<u8> {
+    // TODO check for data.len() being excessively large - maybe a hack?
+    // Frame has three header bytes and the data itself
+    let frame_size = data.len().checked_add(3).unwrap_or_default();
+    let mut framed = Vec::with_capacity(frame_size);
     let len = data.len() as u16;
-    let mut framed = Vec::with_capacity(3 + data.len());
     framed.push(FRAME_START);
     framed.push((len & 0xFF) as u8);
     framed.push((len >> 8) as u8);
     framed.extend_from_slice(data);
     framed
+}
+
+#[cfg(any(feature = "serial", feature = "tcp"))]
+pub async fn read_task<R>(
+    mut reader: ReadHalf<R>,
+    msg_reader: Arc<MessageReader>,
+    connected: Arc<RwLock<bool>>,
+    dispatcher: Arc<EventDispatcher>,
+) where
+    R: AsyncRead,
+{
+    let mut buffer = BytesMut::with_capacity(4096);
+    let mut read_buf = [0u8; 1024];
+
+    loop {
+        match reader.read(&mut read_buf).await {
+            Ok(0) => {
+                *connected.write().await = false;
+                dispatcher
+                    .emit(MeshCoreEvent::new(
+                        EventType::Disconnected,
+                        EventPayload::None,
+                    ))
+                    .await;
+                break;
+            }
+            Ok(n) => {
+                buffer.extend_from_slice(&read_buf[..n]);
+
+                while buffer.len() >= 3 {
+                    if buffer[0] != FRAME_START {
+                        use bytes::Buf;
+                        buffer.advance(1);
+                        continue;
+                    }
+
+                    let len = u16::from_le_bytes([buffer[1], buffer[2]]) as usize;
+                    if buffer.len() < 3 + len {
+                        break;
+                    }
+
+                    let frame = buffer[3..3 + len].to_vec();
+                    use bytes::Buf;
+                    buffer.advance(3 + len);
+
+                    if let Err(e) = msg_reader.handle_rx(frame).await {
+                        tracing::error!("Error handling message: {}", e);
+                    }
+                }
+            }
+            Err(_) => {
+                *connected.write().await = false;
+                dispatcher
+                    .emit(MeshCoreEvent::new(
+                        EventType::Disconnected,
+                        EventPayload::None,
+                    ))
+                    .await;
+                break;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
