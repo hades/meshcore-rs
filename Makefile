@@ -1,5 +1,8 @@
 all: fmt clippy udeps test features debug
 
+clean:
+	cargo clean
+
 fmt:
 	cargo fmt
 
