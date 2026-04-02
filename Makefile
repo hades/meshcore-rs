@@ -1,4 +1,7 @@
-all: fmt clippy udeps test features debug
+all: fmt clippy udeps test features debug jonesy
+
+clean:
+	cargo clean
 
 fmt:
 	cargo fmt
@@ -41,3 +44,6 @@ run:
 
 bundle:
 	cargo bundle --release
+
+jonesy: debug
+	jonesy
