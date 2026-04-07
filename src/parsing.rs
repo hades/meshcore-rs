@@ -96,6 +96,11 @@ pub fn read_bytes<const N: usize>(data: &[u8], offset: usize) -> Result<[u8; N]>
     Ok(arr)
 }
 
+/// Parse a path_len value into the pair of (path_length, prefix_length).
+fn parse_path_len(data: u8) -> (i8, i8) {
+    ((data & 0x3f) as i8, (data >> 6) as i8 + 1)
+}
+
 /// Parse a contact from raw bytes (149 bytes)
 pub fn parse_contact(data: &[u8]) -> Result<Contact> {
     if data.len() < 145 {
@@ -108,7 +113,7 @@ pub fn parse_contact(data: &[u8]) -> Result<Contact> {
     let public_key: [u8; 32] = read_bytes(data, 0)?;
     let contact_type = data[32];
     let flags = data[33];
-    let path_len = data[34] as i8;
+    let (path_len, prefix_length) = parse_path_len(data[34]);
 
     // Path is 64 bytes at offset 35
     let path_end = 35 + 64;
@@ -144,6 +149,7 @@ pub fn parse_contact(data: &[u8]) -> Result<Contact> {
         adv_lat,
         adv_lon,
         last_modification_timestamp,
+        prefix_length,
     })
 }
 
@@ -363,7 +369,8 @@ pub fn parse_contact_msg(data: &[u8]) -> Result<ContactMessage> {
     }
 
     let sender_prefix: [u8; 6] = read_bytes(data, 0)?;
-    let path_len = data[6];
+    let (path_len, prefix_length) = parse_path_len(data[6]);
+    let path_len = path_len as u8;
     let txt_type = data[7];
     let sender_timestamp = read_u32_le(data, 8)?;
 
@@ -388,6 +395,7 @@ pub fn parse_contact_msg(data: &[u8]) -> Result<ContactMessage> {
         text,
         snr: None,
         signature,
+        prefix_length,
     })
 }
 
@@ -402,7 +410,8 @@ pub fn parse_contact_msg_v3(data: &[u8]) -> Result<ContactMessage> {
     // bytes 1-2 are reserved
 
     let sender_prefix: [u8; 6] = read_bytes(data, 3)?;
-    let path_len = data[9];
+    let (path_len, prefix_length) = parse_path_len(data[9]);
+    let path_len = path_len as u8;
     let txt_type = data[10];
     let sender_timestamp = read_u32_le(data, 11)?;
 
@@ -427,6 +436,7 @@ pub fn parse_contact_msg_v3(data: &[u8]) -> Result<ContactMessage> {
         text,
         snr: Some(snr),
         signature,
+        prefix_length,
     })
 }
 
@@ -437,7 +447,8 @@ pub fn parse_channel_msg(data: &[u8]) -> Result<ChannelMessage> {
     }
 
     let channel_idx = data[0];
-    let path_len = data[1];
+    let (path_len, prefix_length) = parse_path_len(data[1]);
+    let path_len = path_len as u8;
     let txt_type = data[2];
     let sender_timestamp = read_u32_le(data, 3)?;
 
@@ -454,6 +465,7 @@ pub fn parse_channel_msg(data: &[u8]) -> Result<ChannelMessage> {
         sender_timestamp,
         text,
         snr: None,
+        prefix_length,
     })
 }
 
@@ -468,7 +480,8 @@ pub fn parse_channel_msg_v3(data: &[u8]) -> Result<ChannelMessage> {
     // bytes 1-2 are reserved
 
     let channel_idx = data[3];
-    let path_len = data[4];
+    let (path_len, prefix_length) = parse_path_len(data[4]);
+    let path_len = path_len as u8;
     let txt_type = data[5];
     let sender_timestamp = read_u32_le(data, 6)?;
 
@@ -485,6 +498,7 @@ pub fn parse_channel_msg_v3(data: &[u8]) -> Result<ChannelMessage> {
         sender_timestamp,
         text,
         snr: Some(snr),
+        prefix_length,
     })
 }
 
@@ -835,6 +849,83 @@ mod tests {
         assert_eq!(contact.adv_lat, 37774900);
         assert_eq!(contact.adv_lon, -122419400);
         assert_eq!(contact.last_modification_timestamp, 2000);
+        assert_eq!(contact.prefix_length, 1);
+    }
+
+    #[test]
+    fn test_parse_contact_prefix_length_2() {
+        // Create a minimal valid contact buffer (145+ bytes)
+        let mut data = vec![0u8; 149];
+        // Public key (32 bytes)
+        data[0..6].copy_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
+        // contact_type
+        data[32] = 1;
+        // flags
+        data[33] = 0x02;
+        // path_len
+        data[34] = 67;
+        // out_path (starts at 35, 64 bytes)
+        data[35..38].copy_from_slice(&[0x0A, 0x0B, 0x0C]);
+        // adv_name (starts at 99, 32 bytes)
+        data[99..104].copy_from_slice(b"Test\0");
+        // last_advert (at 131, 4 bytes)
+        data[131..135].copy_from_slice(&1000u32.to_le_bytes());
+        // adv_lat (at 135, 4 bytes)
+        data[135..139].copy_from_slice(&37774900i32.to_le_bytes());
+        // adv_lon (at 139, 4 bytes)
+        data[139..143].copy_from_slice(&(-122419400i32).to_le_bytes());
+        // last_modification_timestamp (at 143, 4 bytes)
+        data[143..147].copy_from_slice(&2000u32.to_le_bytes());
+
+        let contact = parse_contact(&data).unwrap();
+        assert_eq!(contact.contact_type, 1);
+        assert_eq!(contact.flags, 0x02);
+        assert_eq!(contact.path_len, 3);
+        assert_eq!(contact.out_path, vec![0x0A, 0x0B, 0x0C]);
+        assert_eq!(contact.adv_name, "Test");
+        assert_eq!(contact.last_advert, 1000);
+        assert_eq!(contact.adv_lat, 37774900);
+        assert_eq!(contact.adv_lon, -122419400);
+        assert_eq!(contact.last_modification_timestamp, 2000);
+        assert_eq!(contact.prefix_length, 2);
+    }
+
+    #[test]
+    fn test_parse_contact_prefix_length_3() {
+        // Create a minimal valid contact buffer (145+ bytes)
+        let mut data = vec![0u8; 149];
+        // Public key (32 bytes)
+        data[0..6].copy_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
+        // contact_type
+        data[32] = 1;
+        // flags
+        data[33] = 0x02;
+        // path_len
+        data[34] = 131;
+        // out_path (starts at 35, 64 bytes)
+        data[35..38].copy_from_slice(&[0x0A, 0x0B, 0x0C]);
+        // adv_name (starts at 99, 32 bytes)
+        data[99..104].copy_from_slice(b"Test\0");
+        // last_advert (at 131, 4 bytes)
+        data[131..135].copy_from_slice(&1000u32.to_le_bytes());
+        // adv_lat (at 135, 4 bytes)
+        data[135..139].copy_from_slice(&37774900i32.to_le_bytes());
+        // adv_lon (at 139, 4 bytes)
+        data[139..143].copy_from_slice(&(-122419400i32).to_le_bytes());
+        // last_modification_timestamp (at 143, 4 bytes)
+        data[143..147].copy_from_slice(&2000u32.to_le_bytes());
+
+        let contact = parse_contact(&data).unwrap();
+        assert_eq!(contact.contact_type, 1);
+        assert_eq!(contact.flags, 0x02);
+        assert_eq!(contact.path_len, 3);
+        assert_eq!(contact.out_path, vec![0x0A, 0x0B, 0x0C]);
+        assert_eq!(contact.adv_name, "Test");
+        assert_eq!(contact.last_advert, 1000);
+        assert_eq!(contact.adv_lat, 37774900);
+        assert_eq!(contact.adv_lon, -122419400);
+        assert_eq!(contact.last_modification_timestamp, 2000);
+        assert_eq!(contact.prefix_length, 3);
     }
 
     #[test]

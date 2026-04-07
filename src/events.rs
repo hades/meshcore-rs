@@ -174,6 +174,8 @@ pub struct Contact {
     pub adv_lon: i32,
     /// Last modification timestamp
     pub last_modification_timestamp: u32,
+    /// Path prefix length (1, 2 or 3)
+    pub prefix_length: i8,
 }
 
 impl Contact {
@@ -319,6 +321,8 @@ pub struct ContactMessage {
     pub snr: Option<f32>,
     /// Signature (if txt_type == 2)
     pub signature: Option<[u8; 4]>,
+    /// Path prefix length (1, 2 or 3)
+    pub prefix_length: i8,
 }
 
 impl ContactMessage {
@@ -353,6 +357,8 @@ pub struct ChannelMessage {
     pub text: String,
     /// SNR (only in v3, divided by 4)
     pub snr: Option<f32>,
+    /// Path prefix length (1, 2 or 3)
+    pub prefix_length: i8,
 }
 
 impl ChannelMessage {
@@ -852,6 +858,7 @@ mod tests {
             adv_lat: 0,
             adv_lon: 0,
             last_modification_timestamp: 0,
+            prefix_length: 1,
         };
 
         assert_eq!(contact.prefix(), [0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
@@ -873,6 +880,7 @@ mod tests {
             adv_lat: 0,
             adv_lon: 0,
             last_modification_timestamp: 0,
+            prefix_length: 1,
         };
 
         assert!(contact.public_key_hex().starts_with("deadbeef"));
@@ -894,6 +902,7 @@ mod tests {
             adv_lat: 0,
             adv_lon: 0,
             last_modification_timestamp: 0,
+            prefix_length: 1,
         };
 
         assert_eq!(contact.prefix_hex(), "deadbeef0102");
@@ -912,6 +921,7 @@ mod tests {
             adv_lat: 37774900, // 37.7749 degrees
             adv_lon: 0,
             last_modification_timestamp: 0,
+            prefix_length: 1,
         };
 
         assert!((contact.latitude() - 37.7749).abs() < 0.0001);
@@ -930,6 +940,7 @@ mod tests {
             adv_lat: 0,
             adv_lon: -122419400, // -122.4194 degrees
             last_modification_timestamp: 0,
+            prefix_length: 1,
         };
 
         assert!((contact.longitude() - (-122.4194)).abs() < 0.0001);
@@ -1194,6 +1205,7 @@ mod tests {
             text: "Hello".to_string(),
             snr: Some(10.0),
             signature: None,
+            prefix_length: 1,
         };
 
         let cloned = msg.clone();
@@ -1211,6 +1223,7 @@ mod tests {
             text: "Hello".to_string(),
             snr: None,
             signature: None,
+            prefix_length: 1,
         };
 
         let id = msg.message_id();
@@ -1229,6 +1242,7 @@ mod tests {
             text: "".to_string(),
             snr: None,
             signature: None,
+            prefix_length: 1,
         };
 
         assert_eq!(msg.sender_prefix_hex(), "aabbccddeeff");
@@ -1243,6 +1257,7 @@ mod tests {
             sender_timestamp: 1234567890,
             text: "Channel msg".to_string(),
             snr: Some(8.5),
+            prefix_length: 1,
         };
 
         let cloned = msg.clone();
@@ -1259,6 +1274,7 @@ mod tests {
             sender_timestamp: 0x12345678,
             text: "".to_string(),
             snr: None,
+            prefix_length: 1,
         };
 
         let id = msg.message_id();

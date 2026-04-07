@@ -777,6 +777,7 @@ mod tests {
             adv_lat: 0,
             adv_lon: 0,
             last_modification_timestamp: 0,
+            prefix_length: 1,
         });
 
         reader
@@ -2180,6 +2181,7 @@ mod tests {
             adv_lat: 0,
             adv_lon: 0,
             last_modification_timestamp: 0,
+            prefix_length: 1,
         });
 
         let mut data = vec![PacketType::ContactEnd as u8];

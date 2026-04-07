@@ -1064,6 +1064,7 @@ mod tests {
             adv_lat: 0,
             adv_lon: 0,
             last_modification_timestamp: 0,
+            prefix_length: 1,
         };
         let dest: Destination = contact.into();
         assert!(matches!(dest, Destination::Contact(_)));
@@ -1082,6 +1083,7 @@ mod tests {
             adv_lat: 0,
             adv_lon: 0,
             last_modification_timestamp: 0,
+            prefix_length: 1,
         };
         let dest: Destination = (&contact).into();
         assert!(matches!(dest, Destination::Contact(_)));
@@ -1130,6 +1132,7 @@ mod tests {
             adv_lat: 0,
             adv_lon: 0,
             last_modification_timestamp: 0,
+            prefix_length: 1,
         };
         let dest: Destination = contact.into();
         let prefix = dest.prefix().unwrap();
@@ -1179,6 +1182,7 @@ mod tests {
             adv_lat: 0,
             adv_lon: 0,
             last_modification_timestamp: 0,
+            prefix_length: 1,
         };
         let dest: Destination = contact.into();
         let key = dest.public_key().unwrap();
@@ -1639,6 +1643,7 @@ mod tests {
                 adv_lat: 0,
                 adv_lon: 0,
                 last_modification_timestamp: 0,
+                prefix_length: 1,
             }];
             dispatcher_clone
                 .emit(MeshCoreEvent::new(
@@ -1873,6 +1878,7 @@ mod tests {
                 text: "Hello!".to_string(),
                 snr: None,
                 signature: None,
+                prefix_length: 1,
             };
             dispatcher_clone
                 .emit(MeshCoreEvent::new(
